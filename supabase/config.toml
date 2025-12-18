@@ -1,0 +1,10 @@
+project_id = "jxomblfaoactsdwzbune"
+
+[functions.chat]
+verify_jwt = false
+
+[functions.parse-syllabus]
+verify_jwt = false
+
+[functions.generate-topic-content]
+verify_jwt = false
