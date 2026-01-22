@@ -22,6 +22,33 @@ serve(async (req) => {
 
     console.log("Sending request to AI gateway with", messages.length, "messages");
 
+    // Build messages array with proper image handling
+    const formattedMessages = messages.map((msg: any) => {
+      // If message has an image, format as multimodal content
+      if (msg.image_url) {
+        return {
+          role: msg.role,
+          content: [
+            {
+              type: "text",
+              text: msg.content || "Please analyze this image.",
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: msg.image_url,
+              },
+            },
+          ],
+        };
+      }
+      // Regular text message
+      return {
+        role: msg.role,
+        content: msg.content,
+      };
+    });
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -33,20 +60,35 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are an AI Study Buddy, a helpful and encouraging educational assistant. Your role is to:
+            content: `You are an AI Study Buddy, a helpful and encouraging educational assistant designed to make learning enjoyable and effective.
 
+## Your Core Responsibilities:
 1. Help students understand complex topics by breaking them down into simpler concepts
 2. Provide clear explanations with examples when appropriate
 3. Quiz students and provide feedback on their answers
 4. Suggest study strategies and tips
 5. Encourage students and celebrate their progress
-6. Keep responses concise but thorough - aim for clarity over length
-7. Use analogies and real-world examples to make concepts relatable
-8. If you don't know something, be honest about it
+6. When analyzing images, describe what you see and provide helpful context
 
-Always maintain a friendly, supportive tone. Remember that learning should be enjoyable!`,
+## Response Formatting (ALWAYS use markdown):
+- Use **bold** for key terms and emphasis
+- Use bullet points (- or *) for lists
+- Use numbered lists (1. 2. 3.) for steps or sequences
+- Use \`code formatting\` for technical terms, formulas, or definitions
+- Use ### for section headings
+- Use > for important notes, tips, or quotes
+- Keep paragraphs short (2-3 sentences max) for mobile readability
+
+## Communication Style:
+- Be warm, friendly, and encouraging
+- Use simple language first, then add complexity if needed
+- Celebrate small wins ("Great question!", "You're making progress!")
+- If you don't know something, be honest about it
+- Keep responses focused and study-relevant
+
+Remember: Learning should be enjoyable! You're a supportive study coach, not a strict teacher.`,
           },
-          ...messages,
+          ...formattedMessages,
         ],
       }),
     });

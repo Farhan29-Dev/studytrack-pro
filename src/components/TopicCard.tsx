@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Clock, ChevronRight, Trash2 } from 'lucide-react';
+import { Check, Clock, ChevronRight, Trash2, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -13,6 +13,7 @@ interface TopicCardProps {
   topic: Topic;
   onToggleComplete: (id: string, completed: boolean) => void;
   onDelete?: (id: string) => void;
+  onEdit?: (id: string, name: string) => void;
   showSubject?: boolean;
   subjectName?: string;
   subjectColor?: string;
@@ -22,6 +23,7 @@ export function TopicCard({
   topic,
   onToggleComplete,
   onDelete,
+  onEdit,
   showSubject,
   subjectName,
   subjectColor,
@@ -79,6 +81,17 @@ export function TopicCard({
           )}
         </div>
       </div>
+
+      {onEdit && isHovered && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground hover:text-primary"
+          onClick={() => onEdit(topic.id, topic.name)}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+      )}
 
       {onDelete && isHovered && (
         <Button

@@ -11,42 +11,82 @@ serve(async (req) => {
   }
 
   try {
-    const { topicName, subjectName, unitName } = await req.json();
+    const { topicName, subjectName, unitName, reviewLevel = 1, existingNotes = "" } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    console.log("Generating content for topic:", topicName, "in", subjectName);
+    console.log("Generating content for topic:", topicName, "in", subjectName, "at review level:", reviewLevel);
 
-    const systemPrompt = `You are an expert educational content creator. Generate study materials for students.
+    // Progressive notes system - content depth increases with review level
+    const getLevelInstructions = (level: number) => {
+      if (level === 1) {
+        return `
+## Level 1 - First Review (Concise Overview)
+Create a brief, scannable summary:
+- Maximum 150 words
+- Use bullet points exclusively
+- Focus on 3-5 key concepts only
+- Include essential definitions in bold
+- No examples at this level
+- Mobile-friendly formatting`;
+      } else if (level === 2) {
+        return `
+## Level 2 - Second Review (Enhanced Understanding)
+Extend the existing notes with:
+- Richer explanations for each concept
+- 1-2 relevant examples per key point
+- **Highlighted keywords** for easy scanning
+- Common misconceptions to avoid
+- Keep total length under 300 words
+- Build upon existing content, don't repeat`;
+      } else {
+        return `
+## Level 3+ - Advanced Review (Exam Ready)
+Create comprehensive exam-ready notes:
+- Detailed explanations with depth
+- Multiple examples and applications
+- Tips for remembering key concepts
+- Common exam questions and approaches
+- Q&A format for self-testing
+- Connection to related topics
+- Mnemonics or memory aids if applicable
+- Maximum 500 words
+- Extend existing notes, maintain continuity`;
+      }
+    };
 
-For the given topic, create:
-1. A concise summary (2-3 paragraphs max) that covers key concepts
-2. 5 quiz questions with answers to test understanding
+    const systemPrompt = `You are an expert educational content creator specializing in progressive learning materials.
 
-The summary should be:
-- Clear and easy to understand
-- Focus on the most important concepts
-- Use bullet points where helpful
-- Include key definitions
+${getLevelInstructions(reviewLevel)}
 
-The quiz questions should:
-- Cover different aspects of the topic
-- Be of varying difficulty (easy, medium, hard)
-- Have clear, unambiguous answers
-- Include explanations for each answer
+${existingNotes ? `
+## Existing Notes to Extend:
+${existingNotes}
 
-Return a JSON object with this exact structure:
+IMPORTANT: Do NOT regenerate from scratch. Build upon and enrich the existing notes while maintaining continuity.
+` : ""}
+
+## Quiz Requirements:
+- Generate ${reviewLevel === 1 ? "3" : reviewLevel === 2 ? "5" : "7"} quiz questions
+- Difficulty should match review level
+- Level 1: Basic recall questions
+- Level 2: Understanding and application questions  
+- Level 3+: Analysis and synthesis questions
+- Include clear explanations for each answer
+
+## Output Format (JSON):
 {
-  "summary": "The summary text with key points about the topic...",
+  "summary": "The progressive summary content...",
+  "reviewLevel": ${reviewLevel},
   "quiz": [
     {
       "question": "Question text?",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correctIndex": 0,
-      "explanation": "Brief explanation of why this is correct"
+      "explanation": "Why this is correct and why others are wrong"
     }
   ]
 }`;

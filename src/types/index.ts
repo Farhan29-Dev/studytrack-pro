@@ -40,10 +40,13 @@ export interface Topic {
   last_reviewed: string | null;
   next_review: string | null;
   review_count: number;
+  review_level: number;
   difficulty: 'easy' | 'medium' | 'hard';
+  confidence: 'low' | 'medium' | 'high' | null;
   notes: string | null;
   summary: string | null;
   quiz: QuizQuestion[] | null;
+  weak_areas: string[] | null;
   required_reviews: number;
   revision_interval_days: number;
   sort_order: number;

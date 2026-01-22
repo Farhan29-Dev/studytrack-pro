@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { z } from 'zod';
+import { StudyTrackLogo } from '@/components/StudyTrackLogo';
 
 const authSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -107,7 +108,7 @@ export default function Auth() {
         <div>
           <div className="flex items-center gap-3 mb-8">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-foreground/20 backdrop-blur">
-              <GraduationCap className="h-7 w-7" />
+              <StudyTrackLogo className="h-7 w-7" />
             </div>
             <div>
               <h1 className="font-serif text-2xl font-bold">StudyTrack</h1>

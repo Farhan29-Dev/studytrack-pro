@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Plus, ChevronDown, ChevronRight, Folder, FileText, Trash2 } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Folder, FileText, Trash2, RotateCcw, Pencil } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { TopicCard } from '@/components/TopicCard';
 import { ProgressRing } from '@/components/ProgressRing';
@@ -24,6 +25,10 @@ export default function Syllabus() {
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(new Set());
   const [newTopicDialog, setNewTopicDialog] = useState<{ unitId: string; open: boolean } | null>(null);
   const [newTopicName, setNewTopicName] = useState('');
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingItem, setEditingItem] = useState<{ type: 'subject' | 'unit' | 'topic'; id: string; name: string } | null>(null);
+  
 
   useEffect(() => {
     if (user) {
@@ -72,10 +77,6 @@ export default function Syllabus() {
       );
 
       setSubjects(subjectsWithUnits);
-      // Auto-expand first subject
-      if (subjectsWithUnits.length > 0) {
-        setExpandedSubjects(new Set([subjectsWithUnits[0].id]));
-      }
     } catch (error) {
       console.error('Error fetching syllabus:', error);
       toast({
@@ -97,6 +98,7 @@ export default function Syllabus() {
 
       if (error) throw error;
 
+      // Update state locally without refetching
       setSubjects((prev) =>
         prev.map((subject) => ({
           ...subject,
@@ -109,13 +111,8 @@ export default function Syllabus() {
         }))
       );
 
-      // Update subject progress
-      await updateSubjectProgress();
-
-      toast({
-        title: completed ? 'Topic completed!' : 'Topic marked incomplete',
-        description: completed ? 'Great progress!' : 'Keep studying!',
-      });
+      // Update subject progress in the background (don't refetch)
+      updateSubjectProgress();
     } catch (error) {
       console.error('Error updating topic:', error);
       toast({
@@ -127,6 +124,8 @@ export default function Syllabus() {
   };
 
   const updateSubjectProgress = async () => {
+    // Calculate and update progress for each subject in the database only
+    // Don't refetch - just update the database in background
     for (const subject of subjects) {
       const totalTopics = subject.units.reduce((acc, unit) => acc + unit.topics.length, 0);
       const completedTopics = subject.units.reduce(
@@ -137,7 +136,6 @@ export default function Syllabus() {
 
       await supabase.from('subjects').update({ progress }).eq('id', subject.id);
     }
-    fetchSyllabus();
   };
 
   const addTopic = async () => {
@@ -190,6 +188,134 @@ export default function Syllabus() {
     }
   };
 
+  const deleteUnit = async (unitId: string) => {
+    try {
+      // First delete all topics in this unit
+      const { error: topicsError } = await supabase.from('topics').delete().eq('unit_id', unitId);
+      if (topicsError) throw topicsError;
+
+      // Then delete the unit itself
+      const { error: unitError } = await supabase.from('units').delete().eq('id', unitId);
+      if (unitError) throw unitError;
+
+      fetchSyllabus();
+      toast({
+        title: 'Unit deleted',
+        description: 'Unit and all its topics have been removed',
+      });
+    } catch (error) {
+      console.error('Error deleting unit:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete unit',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const deleteSubject = async (subjectId: string) => {
+    try {
+      // Get all units for this subject
+      const { data: unitsData } = await supabase.from('units').select('id').eq('subject_id', subjectId);
+      
+      if (unitsData && unitsData.length > 0) {
+        const unitIds = unitsData.map(u => u.id);
+        // Delete all topics in these units
+        const { error: topicsError } = await supabase.from('topics').delete().in('unit_id', unitIds);
+        if (topicsError) throw topicsError;
+
+        // Delete all units
+        const { error: unitsError } = await supabase.from('units').delete().eq('subject_id', subjectId);
+        if (unitsError) throw unitsError;
+      }
+
+      // Delete the subject
+      const { error: subjectError } = await supabase.from('subjects').delete().eq('id', subjectId);
+      if (subjectError) throw subjectError;
+
+      fetchSyllabus();
+      toast({
+        title: 'Subject deleted',
+        description: 'Subject and all its content have been removed',
+      });
+    } catch (error) {
+      console.error('Error deleting subject:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete subject',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const resetSyllabus = async () => {
+    try {
+      // Get all subjects for this user
+      const { data: subjectsData } = await supabase.from('subjects').select('id');
+      
+      if (subjectsData && subjectsData.length > 0) {
+        const subjectIds = subjectsData.map(s => s.id);
+        
+        // Get all units for these subjects
+        const { data: unitsData } = await supabase.from('units').select('id').in('subject_id', subjectIds);
+        
+        if (unitsData && unitsData.length > 0) {
+          const unitIds = unitsData.map(u => u.id);
+          // Delete all topics
+          await supabase.from('topics').delete().in('unit_id', unitIds);
+        }
+        
+        // Delete all units
+        await supabase.from('units').delete().in('subject_id', subjectIds);
+        
+        // Delete all subjects
+        await supabase.from('subjects').delete().in('id', subjectIds);
+      }
+
+      setSubjects([]);
+      setResetDialogOpen(false);
+      toast({
+        title: 'Syllabus reset',
+        description: 'All subjects, units, and topics have been removed',
+      });
+    } catch (error) {
+      console.error('Error resetting syllabus:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to reset syllabus',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const saveEditItem = async () => {
+    if (!editingItem || !editingItem.name.trim()) return;
+
+    try {
+      if (editingItem.type === 'subject') {
+        await supabase.from('subjects').update({ name: editingItem.name.trim() }).eq('id', editingItem.id);
+      } else if (editingItem.type === 'unit') {
+        await supabase.from('units').update({ name: editingItem.name.trim() }).eq('id', editingItem.id);
+      } else if (editingItem.type === 'topic') {
+        await supabase.from('topics').update({ name: editingItem.name.trim() }).eq('id', editingItem.id);
+      }
+
+      setEditingItem(null);
+      fetchSyllabus();
+      toast({
+        title: 'Updated',
+        description: `${editingItem.type.charAt(0).toUpperCase() + editingItem.type.slice(1)} name updated`,
+      });
+    } catch (error) {
+      console.error('Error updating item:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const toggleSubject = (subjectId: string) => {
     setExpandedSubjects((prev) => {
       const next = new Set(prev);
@@ -236,7 +362,64 @@ export default function Syllabus() {
               <h1 className="font-serif text-3xl font-bold text-foreground">Interactive Syllabus</h1>
               <p className="text-muted-foreground mt-1">Organize and track your study materials</p>
             </div>
+            {subjects.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={isEditMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsEditMode(!isEditMode)}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  {isEditMode ? 'Done Editing' : 'Edit Syllabus'}
+                </Button>
+                <AlertDialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm">
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Reset Syllabus
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Reset Entire Syllabus?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete ALL subjects, units, and topics. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={resetSyllabus} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        Reset Everything
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            )}
           </div>
+
+          {/* Edit Dialog */}
+          <Dialog open={!!editingItem} onOpenChange={(open) => !open && setEditingItem(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Edit {editingItem?.type}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name">Name</Label>
+                  <Input
+                    id="edit-name"
+                    value={editingItem?.name || ''}
+                    onChange={(e) => setEditingItem(prev => prev ? { ...prev, name: e.target.value } : null)}
+                    placeholder="Enter name..."
+                  />
+                </div>
+                <Button onClick={saveEditItem} className="w-full">
+                  Save Changes
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {subjects.length === 0 ? (
             <Card className="p-12 text-center">
@@ -261,7 +444,17 @@ export default function Syllabus() {
 
                 return (
                   <Card key={subject.id} className="overflow-hidden">
-                    <Collapsible open={isExpanded} onOpenChange={() => toggleSubject(subject.id)}>
+                    <Collapsible
+                      open={isExpanded}
+                      onOpenChange={(open) => {
+                        setExpandedSubjects((prev) => {
+                          const next = new Set(prev);
+                          if (open) next.add(subject.id);
+                          else next.delete(subject.id);
+                          return next;
+                        });
+                      }}
+                    >
                       <CollapsibleTrigger asChild>
                         <CardHeader
                           className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -287,13 +480,59 @@ export default function Syllabus() {
                                 </p>
                               </div>
                             </div>
-                            <ProgressRing
-                              progress={subject.progress}
-                              size={50}
-                              strokeWidth={4}
-                              showLabel={false}
-                              color={subject.color}
-                            />
+                            <div className="flex items-center gap-2">
+                              <ProgressRing
+                                progress={subject.progress}
+                                size={50}
+                                strokeWidth={4}
+                                showLabel={false}
+                                color={subject.color}
+                              />
+                              {isEditMode && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingItem({ type: 'subject', id: subject.id, name: subject.name });
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {isEditMode && (
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Delete Subject?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This will permanently delete "{subject.name}" and all its units and topics.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => deleteSubject(subject.id)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      >
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
+                            </div>
                           </div>
                         </CardHeader>
                       </CollapsibleTrigger>
@@ -314,7 +553,14 @@ export default function Syllabus() {
                                   <Collapsible
                                     key={unit.id}
                                     open={isUnitExpanded}
-                                    onOpenChange={() => toggleUnit(unit.id)}
+                                    onOpenChange={(open) => {
+                                      setExpandedUnits((prev) => {
+                                        const next = new Set(prev);
+                                        if (open) next.add(unit.id);
+                                        else next.delete(unit.id);
+                                        return next;
+                                      });
+                                    }}
                                   >
                                     <CollapsibleTrigger asChild>
                                       <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors">
@@ -330,6 +576,50 @@ export default function Syllabus() {
                                             {unitCompleted}/{unit.topics.length} completed
                                           </p>
                                         </div>
+                                        {isEditMode && (
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7 text-muted-foreground hover:text-primary"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setEditingItem({ type: 'unit', id: unit.id, name: unit.name });
+                                            }}
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" />
+                                          </Button>
+                                        )}
+                                        {isEditMode && (
+                                          <AlertDialog>
+                                            <AlertDialogTrigger asChild>
+                                              <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </Button>
+                                            </AlertDialogTrigger>
+                                            <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                                              <AlertDialogHeader>
+                                                <AlertDialogTitle>Delete Unit?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                  This will permanently delete "{unit.name}" and all its topics.
+                                                </AlertDialogDescription>
+                                              </AlertDialogHeader>
+                                              <AlertDialogFooter>
+                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                <AlertDialogAction
+                                                  onClick={() => deleteUnit(unit.id)}
+                                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                                >
+                                                  Delete
+                                                </AlertDialogAction>
+                                              </AlertDialogFooter>
+                                            </AlertDialogContent>
+                                          </AlertDialog>
+                                        )}
                                       </div>
                                     </CollapsibleTrigger>
 
@@ -340,7 +630,8 @@ export default function Syllabus() {
                                             key={topic.id}
                                             topic={topic}
                                             onToggleComplete={toggleTopicComplete}
-                                            onDelete={deleteTopic}
+                                            onDelete={isEditMode ? deleteTopic : undefined}
+                                            onEdit={isEditMode ? (id, name) => setEditingItem({ type: 'topic', id, name }) : undefined}
                                             subjectColor={subject.color}
                                           />
                                         ))}

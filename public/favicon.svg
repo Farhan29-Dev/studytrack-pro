@@ -1,0 +1,12 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="4" fill="#0ea5e9"/>
+  <!-- Book -->
+  <rect x="8" y="10" width="16" height="12" rx="1.5" fill="white"/>
+  <rect x="10" y="13" width="5" height="1" rx="0.5" fill="#0ea5e9"/>
+  <rect x="10" y="15.5" width="8" height="1" rx="0.5" fill="#0ea5e9"/>
+  <rect x="10" y="18" width="6" height="1" rx="0.5" fill="#0ea5e9"/>
+  <!-- Brain/Spark -->
+  <path d="M23 12.5C23 11.1193 21.8807 10 20.5 10C19.1193 10 18 11.1193 18 12.5C18 13.8807 19.1193 15 20.5 15" stroke="white" stroke-width="1" stroke-linecap="round" fill="none"/>
+  <circle cx="20.5" cy="12.5" r="0.5" fill="white"/>
+  <path d="M20.5 15V16.5M19.5 16H21.5" stroke="white" stroke-width="1" stroke-linecap="round"/>
+</svg>

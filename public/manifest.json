@@ -1,0 +1,64 @@
+{
+  "name": "StudyTrack Pro",
+  "short_name": "StudyTrack",
+  "description": "AI-Powered Study Companion for efficient learning",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en-US",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Home",
+      "description": "Go to main dashboard",
+      "url": "/dashboard",
+      "icons": [{ "src": "/icon-192x192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI Buddy",
+      "short_name": "AI",
+      "description": "Chat with AI study assistant",
+      "url": "/ai-buddy",
+      "icons": [{ "src": "/icon-192x192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Tests",
+      "short_name": "Tests",
+      "description": "Take practice tests",
+      "url": "/tests",
+      "icons": [{ "src": "/icon-192x192.svg", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "/screenshot-tablet.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ]
+}

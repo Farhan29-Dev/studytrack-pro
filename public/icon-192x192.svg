@@ -1,0 +1,15 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="192" height="192" rx="24" fill="#0ea5e9"/>
+  <!-- Book -->
+  <rect x="48" y="56" width="96" height="80" rx="8" fill="white"/>
+  <rect x="56" y="72" width="32" height="4" rx="2" fill="#0ea5e9"/>
+  <rect x="56" y="84" width="48" height="4" rx="2" fill="#0ea5e9"/>
+  <rect x="56" y="96" width="40" height="4" rx="2" fill="#0ea5e9"/>
+  <rect x="56" y="108" width="32" height="4" rx="2" fill="#0ea5e9"/>
+  <!-- Brain/Spark -->
+  <path d="M136 72C136 66.4772 131.523 62 126 62C120.477 62 116 66.4772 116 72C116 77.5228 120.477 82 126 82" stroke="white" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <circle cx="126" cy="72" r="3" fill="white"/>
+  <path d="M126 82V88M120 85H132" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <!-- Spark lines -->
+  <path d="M110 78L114 82M142 78L138 82" stroke="white" stroke-width="2" stroke-linecap="round"/>
+</svg>

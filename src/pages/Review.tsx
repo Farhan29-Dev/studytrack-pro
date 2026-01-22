@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Check, Brain, ChevronDown, ChevronRight, RotateCcw, Trophy, Clock, Star, Loader2, BookOpen, History, AlertCircle } from 'lucide-react';
+import { Check, Brain, ChevronDown, ChevronRight, RotateCcw, Trophy, Clock, Star, Loader2, BookOpen, History, AlertCircle, Save, FileText, CheckSquare, Square, Layers } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { RequireAuth, useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
@@ -14,6 +15,7 @@ import { ReviewTopic, QuizQuestion, Topic } from '@/types';
 import { calculateNextReview, Difficulty, REQUIRED_REVIEWS, isTopicMastered } from '@/lib/spaced-repetition';
 import { cn } from '@/lib/utils';
 import { format, differenceInDays, isPast, isToday } from 'date-fns';
+import { ConfidenceMeter } from '@/components/ConfidenceMeter';
 
 interface SubjectData {
   id: string;
@@ -26,9 +28,11 @@ interface TopicWithMeta extends Topic {
   subject_name: string;
   subject_color: string;
   unit_name: string;
+  subject_id: string;
 }
 
-type ReviewStep = 'list' | 'notes' | 'quiz' | 'score' | 'difficulty';
+type ReviewStep = 'list' | 'notes' | 'quiz' | 'score' | 'confidence' | 'difficulty';
+type ReviewMode = 'single' | 'bulk';
 
 export default function Review() {
   const { user } = useAuth();
@@ -36,14 +40,26 @@ export default function Review() {
   const [loading, setLoading] = useState(true);
   const [subjectsData, setSubjectsData] = useState<SubjectData[]>([]);
   const [openSubjects, setOpenSubjects] = useState<string[]>([]);
+  const [openUnits, setOpenUnits] = useState<string[]>([]);
+  const [openSavedSubjects, setOpenSavedSubjects] = useState<string[]>([]);
+  const [openSavedUnits, setOpenSavedUnits] = useState<string[]>([]);
+  
+  // Selection state for bulk review
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   
   // Review state
+  const [reviewMode, setReviewMode] = useState<ReviewMode>('single');
   const [currentTopic, setCurrentTopic] = useState<TopicWithMeta | null>(null);
+  const [bulkTopics, setBulkTopics] = useState<TopicWithMeta[]>([]);
+  const [bulkIndex, setBulkIndex] = useState(0);
   const [reviewStep, setReviewStep] = useState<ReviewStep>('list');
   const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
   const [showQuizAnswers, setShowQuizAnswers] = useState<boolean[]>([]);
   const [quizScore, setQuizScore] = useState(0);
   const [generatingContent, setGeneratingContent] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [selectedConfidence, setSelectedConfidence] = useState<'low' | 'medium' | 'high' | null>(null);
   
   // Analytics
   const [reviewedToday, setReviewedToday] = useState(0);
@@ -75,10 +91,13 @@ export default function Review() {
             .map(t => ({
               ...t,
               difficulty: t.difficulty as 'easy' | 'medium' | 'hard',
+              confidence: t.confidence as 'low' | 'medium' | 'high' | null,
               quiz: t.quiz as unknown as QuizQuestion[] | null,
+              weak_areas: t.weak_areas as string[] | null,
               subject_name: subject.name,
               subject_color: subject.color,
               unit_name: unit.name,
+              subject_id: subject.id,
             }))
         })).filter(u => u.topics.length > 0)
       })).filter(s => s.units.length > 0);
@@ -109,32 +128,122 @@ export default function Review() {
     return { text: `${days} days remaining`, urgent: false, overdue: false };
   };
 
-  const startReview = (topic: TopicWithMeta) => {
+  // Selection handlers
+  const toggleTopicSelection = (topicId: string) => {
+    setSelectedTopics(prev => 
+      prev.includes(topicId) ? prev.filter(id => id !== topicId) : [...prev, topicId]
+    );
+  };
+
+  const selectUnit = (unitTopics: TopicWithMeta[]) => {
+    const topicIds = unitTopics.map(t => t.id);
+    const allSelected = topicIds.every(id => selectedTopics.includes(id));
+    if (allSelected) {
+      setSelectedTopics(prev => prev.filter(id => !topicIds.includes(id)));
+    } else {
+      setSelectedTopics(prev => [...new Set([...prev, ...topicIds])]);
+    }
+  };
+
+  const startSingleReview = (topic: TopicWithMeta) => {
+    setReviewMode('single');
     setCurrentTopic(topic);
+    setBulkTopics([]);
+    setBulkIndex(0);
     setQuizAnswers([]);
     setShowQuizAnswers([]);
     setQuizScore(0);
-    setReviewStep(topic.summary ? 'notes' : 'notes');
+    setSelectedConfidence(null);
+    setReviewStep('notes');
+  };
+
+  const startBulkReview = () => {
+    const allTopics = subjectsData.flatMap(s => s.units.flatMap(u => u.topics));
+    const topicsToReview = allTopics.filter(t => selectedTopics.includes(t.id));
+    
+    if (topicsToReview.length === 0) {
+      toast({ title: 'No topics selected', description: 'Please select at least one topic to review', variant: 'destructive' });
+      return;
+    }
+
+    setReviewMode('bulk');
+    setBulkTopics(topicsToReview);
+    setBulkIndex(0);
+    setCurrentTopic(topicsToReview[0]);
+    setQuizAnswers([]);
+    setShowQuizAnswers([]);
+    setQuizScore(0);
+    setSelectedConfidence(null);
+    setReviewStep('notes');
+    setSelectionMode(false);
   };
 
   const generateContent = async () => {
     if (!currentTopic) return;
     setGeneratingContent(true);
     try {
+      const reviewLevel = currentTopic.review_level || 1;
       const { data, error } = await supabase.functions.invoke('generate-topic-content', {
-        body: { topicName: currentTopic.name, subjectName: currentTopic.subject_name, unitName: currentTopic.unit_name },
+        body: { 
+          topicName: currentTopic.name, 
+          subjectName: currentTopic.subject_name, 
+          unitName: currentTopic.unit_name,
+          reviewLevel 
+        },
       });
       if (error) throw error;
       if (data.success && data.data) {
-        await supabase.from('topics').update({ summary: data.data.summary, quiz: data.data.quiz }).eq('id', currentTopic.id);
-        setCurrentTopic(prev => prev ? { ...prev, summary: data.data.summary, quiz: data.data.quiz } : null);
-        toast({ title: 'Content generated', description: 'Notes and quiz are ready' });
+        // Update the topic in the database
+        await supabase.from('topics').update({ 
+          summary: data.data.summary, 
+          quiz: data.data.quiz,
+          review_level: reviewLevel 
+        }).eq('id', currentTopic.id);
+        
+        // Update local state immediately for better UX
+        const updatedTopic = { 
+          ...currentTopic, 
+          summary: data.data.summary, 
+          quiz: data.data.quiz, 
+          review_level: reviewLevel,
+          updated_at: new Date().toISOString() // Force re-render
+        };
+        setCurrentTopic(updatedTopic);
+        
+        // If in bulk mode, update the topic in bulkTopics array as well
+        if (reviewMode === 'bulk') {
+          setBulkTopics(prev => prev.map(t => 
+            t.id === currentTopic.id ? updatedTopic : t
+          ));
+        }
+        
+        // Force a re-render by updating a key
+        setReviewStep('notes');
+        
+        toast({ title: 'Content generated', description: `Level ${reviewLevel} notes and quiz are ready` });
       }
     } catch (error) {
       console.error('Error generating content:', error);
       toast({ title: 'Error', description: 'Failed to generate content', variant: 'destructive' });
     } finally {
       setGeneratingContent(false);
+    }
+  };
+
+  const saveNotes = async () => {
+    if (!currentTopic || !currentTopic.summary) return;
+    setSavingNotes(true);
+    try {
+      await supabase.from('topics').update({ 
+        notes: currentTopic.summary 
+      }).eq('id', currentTopic.id);
+      setCurrentTopic(prev => prev ? { ...prev, notes: currentTopic.summary } : null);
+      toast({ title: 'Notes saved!', description: 'You can access your saved notes anytime from the Saved Notes tab' });
+    } catch (error) {
+      console.error('Error saving notes:', error);
+      toast({ title: 'Error', description: 'Failed to save notes', variant: 'destructive' });
+    } finally {
+      setSavingNotes(false);
     }
   };
 
@@ -162,7 +271,7 @@ export default function Review() {
   };
 
   const handleDifficultyRating = async (difficulty: Difficulty) => {
-    if (!currentTopic) return;
+    if (!currentTopic || !selectedConfidence) return;
     try {
       const newReviewCount = currentTopic.review_count + 1;
       const requiredReviews = REQUIRED_REVIEWS[difficulty];
@@ -171,26 +280,51 @@ export default function Review() {
 
       await supabase.from('topics').update({
         difficulty,
+        confidence: selectedConfidence,
         last_reviewed: new Date().toISOString(),
         next_review: nextReview.toISOString(),
         review_count: newReviewCount,
         required_reviews: requiredReviews,
+        review_level: Math.min((currentTopic.review_level || 1) + 1, 3),
       }).eq('id', currentTopic.id);
 
       setReviewedToday(prev => prev + 1);
       if (mastered) setMasteredCount(prev => prev + 1);
 
-      toast({
-        title: mastered ? '🎉 Topic Mastered!' : 'Review Complete',
-        description: mastered
-          ? `Completed ${newReviewCount}/${requiredReviews} reviews`
-          : `Next review: ${format(nextReview, 'MMM d, yyyy')} (${newReviewCount}/${requiredReviews})`,
-      });
+      // Reset confidence for next topic
+      setSelectedConfidence(null);
 
-      // Reset and refresh
-      setCurrentTopic(null);
-      setReviewStep('list');
-      fetchData();
+      // Handle bulk review progression
+      if (reviewMode === 'bulk' && bulkIndex < bulkTopics.length - 1) {
+        const nextIndex = bulkIndex + 1;
+        setBulkIndex(nextIndex);
+        setCurrentTopic(bulkTopics[nextIndex]);
+        setQuizAnswers([]);
+        setShowQuizAnswers([]);
+        setQuizScore(0);
+        setReviewStep('notes');
+        toast({ 
+          title: `Topic ${bulkIndex + 1}/${bulkTopics.length} completed`, 
+          description: `Moving to: ${bulkTopics[nextIndex].name}` 
+        });
+      } else {
+        toast({
+          title: reviewMode === 'bulk' ? '🎉 Bulk Review Complete!' : (mastered ? '🎉 Topic Mastered!' : 'Review Complete'),
+          description: reviewMode === 'bulk' 
+            ? `Reviewed ${bulkTopics.length} topics successfully`
+            : (mastered
+              ? `Completed ${newReviewCount}/${requiredReviews} reviews`
+              : `Next review: ${format(nextReview, 'MMM d, yyyy')} (${newReviewCount}/${requiredReviews})`),
+        });
+
+        // Reset and refresh
+        setCurrentTopic(null);
+        setBulkTopics([]);
+        setBulkIndex(0);
+        setSelectedTopics([]);
+        setReviewStep('list');
+        fetchData();
+      }
     } catch (error) {
       console.error('Error updating review:', error);
       toast({ title: 'Error', description: 'Failed to save review', variant: 'destructive' });
@@ -201,6 +335,16 @@ export default function Review() {
   const dueTopics = allTopics.filter(t => !t.next_review || isPast(new Date(t.next_review)) || isToday(new Date(t.next_review)));
   const upcomingTopics = allTopics.filter(t => t.next_review && !isPast(new Date(t.next_review)) && !isToday(new Date(t.next_review)));
   const masteredTopics = allTopics.filter(t => isTopicMastered(t.review_count, t.difficulty));
+  const savedNotesTopics = allTopics.filter(t => t.notes);
+
+  // Group saved notes by subject and unit
+  const savedNotesGrouped = subjectsData.map(subject => ({
+    ...subject,
+    units: subject.units.map(unit => ({
+      ...unit,
+      topics: unit.topics.filter(t => t.notes)
+    })).filter(u => u.topics.length > 0)
+  })).filter(s => s.units.length > 0);
 
   if (loading) {
     return (
@@ -216,13 +360,28 @@ export default function Review() {
 
   // Active Review Mode
   if (currentTopic && reviewStep !== 'list') {
+    const totalInBulk = bulkTopics.length;
+    const currentPosition = bulkIndex + 1;
+
     return (
       <RequireAuth>
         <DashboardLayout>
           <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
-            <Button variant="ghost" onClick={() => { setCurrentTopic(null); setReviewStep('list'); }}>
-              ← Back to Topics
-            </Button>
+            <div className="flex items-center justify-between">
+              <Button variant="ghost" onClick={() => { setCurrentTopic(null); setReviewStep('list'); setBulkTopics([]); setBulkIndex(0); }}>
+                ← Back to Topics
+              </Button>
+              {reviewMode === 'bulk' && (
+                <Badge variant="secondary" className="text-sm">
+                  Topic {currentPosition} of {totalInBulk}
+                </Badge>
+              )}
+            </div>
+
+            {/* Bulk progress bar */}
+            {reviewMode === 'bulk' && (
+              <Progress value={(currentPosition / totalInBulk) * 100} className="h-2" />
+            )}
 
             <Card className="overflow-hidden">
               <div className="h-2" style={{ backgroundColor: currentTopic.subject_color }} />
@@ -232,7 +391,7 @@ export default function Review() {
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   <Badge variant="secondary">{currentTopic.unit_name}</Badge>
                   <Badge variant="outline" className="ml-auto">
-                    {currentTopic.review_count}/{REQUIRED_REVIEWS[currentTopic.difficulty]} reviews
+                    Level {currentTopic.review_level || 1} • {currentTopic.review_count}/{REQUIRED_REVIEWS[currentTopic.difficulty]} reviews
                   </Badge>
                 </div>
                 <CardTitle className="font-serif text-2xl text-center py-4">{currentTopic.name}</CardTitle>
@@ -241,15 +400,45 @@ export default function Review() {
                 {/* Step 1: Notes */}
                 {reviewStep === 'notes' && (
                   <div className="space-y-4">
-                    {currentTopic.summary ? (
+                    {generatingContent ? (
+                      <div className="text-center py-8">
+                        <div className="h-12 w-12 rounded-full border-4 border-primary border-t-transparent animate-spin mx-auto mb-4" />
+                        <p className="text-muted-foreground mb-2">Generating study notes...</p>
+                        <p className="text-xs text-muted-foreground">This may take a few seconds</p>
+                      </div>
+                    ) : currentTopic.summary ? (
                       <>
-                        <div className="bg-muted/50 rounded-lg p-4 max-h-64 overflow-y-auto">
-                          <h4 className="font-medium mb-2 flex items-center gap-2">
-                            <BookOpen className="h-4 w-4" /> Study Notes
-                          </h4>
-                          <p className="text-sm whitespace-pre-wrap">{currentTopic.summary}</p>
+                        <div className="bg-muted/50 rounded-lg p-4 max-h-80 overflow-y-auto">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-medium flex items-center gap-2">
+                              <BookOpen className="h-4 w-4" /> 
+                              Study Notes
+                              <Badge variant="outline" className="ml-2">Level {currentTopic.review_level || 1}</Badge>
+                            </h4>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              onClick={saveNotes}
+                              disabled={savingNotes || currentTopic.notes === currentTopic.summary}
+                            >
+                              {savingNotes ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : currentTopic.notes === currentTopic.summary ? (
+                                <><Check className="h-4 w-4 mr-1" /> Saved</>
+                              ) : (
+                                <><Save className="h-4 w-4 mr-1" /> Save Notes</>
+                              )}
+                            </Button>
+                          </div>
+                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                            <NotesContent content={currentTopic.summary} level={currentTopic.review_level || 1} />
+                          </div>
                         </div>
                         <div className="flex justify-center gap-3">
+                          <Button variant="outline" onClick={generateContent} disabled={generatingContent}>
+                            {generatingContent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Brain className="mr-2 h-4 w-4" />}
+                            Regenerate Notes
+                          </Button>
                           {currentTopic.quiz?.length ? (
                             <Button onClick={() => setReviewStep('quiz')}>Proceed to Quiz →</Button>
                           ) : (
@@ -311,9 +500,28 @@ export default function Review() {
                       {quizScore === currentTopic.quiz.length ? 'Perfect! 🎉' : quizScore >= currentTopic.quiz.length / 2 ? 'Good job! 👍' : 'Keep practicing! 💪'}
                     </p>
                     <Progress value={(quizScore / currentTopic.quiz.length) * 100} className="h-3" />
-                    <Button onClick={() => setReviewStep('difficulty')} className="mt-4">
-                      Rate Topic Difficulty →
+                    <Button onClick={() => setReviewStep('confidence')} className="mt-4">
+                      Rate Your Confidence →
                     </Button>
+                  </div>
+                )}
+
+                {/* Step 3.5: Confidence Rating */}
+                {reviewStep === 'confidence' && (
+                  <div className="space-y-6 py-6">
+                    <ConfidenceMeter
+                      onSelect={(level) => setSelectedConfidence(level)}
+                      selected={selectedConfidence}
+                    />
+                    <div className="flex justify-center">
+                      <Button
+                        onClick={() => setReviewStep('difficulty')}
+                        disabled={!selectedConfidence}
+                        className="mt-4"
+                      >
+                        Rate Topic Difficulty →
+                      </Button>
+                    </div>
                   </div>
                 )}
 
@@ -360,7 +568,7 @@ export default function Review() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="flex items-center gap-3 p-4">
                 <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
@@ -407,11 +615,41 @@ export default function Review() {
             </Card>
           </div>
 
+          {/* Selection Mode Controls */}
+          <Card className="bg-muted/30">
+            <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
+              <div className="flex items-center gap-4">
+                <Button 
+                  variant={selectionMode ? "default" : "outline"}
+                  onClick={() => { setSelectionMode(!selectionMode); setSelectedTopics([]); }}
+                >
+                  <Layers className="mr-2 h-4 w-4" />
+                  {selectionMode ? 'Cancel Selection' : 'Select Multiple'}
+                </Button>
+                {selectionMode && selectedTopics.length > 0 && (
+                  <Badge variant="secondary" className="text-sm">
+                    {selectedTopics.length} topic{selectedTopics.length !== 1 ? 's' : ''} selected
+                  </Badge>
+                )}
+              </div>
+              {selectionMode && selectedTopics.length > 0 && (
+                <Button onClick={startBulkReview}>
+                  <Brain className="mr-2 h-4 w-4" />
+                  Review Selected ({selectedTopics.length})
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
           <Tabs defaultValue="due" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="due">Due for Review ({dueTopics.length})</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="due">Due ({dueTopics.length})</TabsTrigger>
               <TabsTrigger value="upcoming">Upcoming ({upcomingTopics.length})</TabsTrigger>
               <TabsTrigger value="history">Mastered ({masteredCount})</TabsTrigger>
+              <TabsTrigger value="saved">
+                <FileText className="mr-1 h-4 w-4" />
+                Notes ({savedNotesTopics.length})
+              </TabsTrigger>
             </TabsList>
 
             {/* Due Topics Tab */}
@@ -442,24 +680,68 @@ export default function Review() {
                           </CardHeader>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                          <CardContent className="pt-0 space-y-2">
-                            {dueInSubject.map(topic => {
-                              const reviewInfo = getDaysUntilReview(topic.next_review);
+                          <CardContent className="pt-0 space-y-4">
+                            {subject.units.map(unit => {
+                              const dueInUnit = unit.topics.filter(t => !t.next_review || isPast(new Date(t.next_review)) || isToday(new Date(t.next_review)));
+                              if (dueInUnit.length === 0) return null;
+                              const unitSelected = dueInUnit.every(t => selectedTopics.includes(t.id));
+                              
                               return (
-                                <div key={topic.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
-                                  <div className="flex-1">
-                                    <p className="font-medium">{topic.name}</p>
-                                    <p className="text-xs text-muted-foreground">{topic.unit_name}</p>
+                                <div key={unit.id} className="space-y-2">
+                                  <div className="flex items-center justify-between py-2 border-b">
+                                    <div className="flex items-center gap-2">
+                                      {selectionMode && (
+                                        <Checkbox 
+                                          checked={unitSelected}
+                                          onCheckedChange={() => selectUnit(dueInUnit)}
+                                        />
+                                      )}
+                                      <span className="font-medium text-sm text-muted-foreground">{unit.name}</span>
+                                      <Badge variant="outline" className="text-xs">{dueInUnit.length} topics</Badge>
+                                    </div>
+                                    {selectionMode && (
+                                      <Button size="sm" variant="ghost" onClick={() => selectUnit(dueInUnit)}>
+                                        {unitSelected ? 'Deselect Unit' : 'Select Unit'}
+                                      </Button>
+                                    )}
                                   </div>
-                                  <div className="flex items-center gap-3">
-                                    <Badge variant={reviewInfo.overdue ? 'destructive' : 'outline'} className="text-xs">
-                                      {reviewInfo.text}
-                                    </Badge>
-                                    <Badge variant="secondary" className="text-xs">
-                                      {topic.review_count}/{REQUIRED_REVIEWS[topic.difficulty]}
-                                    </Badge>
-                                    <Button size="sm" onClick={() => startReview(topic)}>Review</Button>
-                                  </div>
+                                  {dueInUnit.map(topic => {
+                                    const reviewInfo = getDaysUntilReview(topic.next_review);
+                                    const isSelected = selectedTopics.includes(topic.id);
+                                    return (
+                                      <div 
+                                        key={topic.id} 
+                                        className={cn(
+                                          "flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors",
+                                          isSelected && "ring-2 ring-primary bg-primary/5"
+                                        )}
+                                      >
+                                        <div className="flex items-center gap-3 flex-1">
+                                          {selectionMode && (
+                                            <Checkbox 
+                                              checked={isSelected}
+                                              onCheckedChange={() => toggleTopicSelection(topic.id)}
+                                            />
+                                          )}
+                                          <div>
+                                            <p className="font-medium">{topic.name}</p>
+                                            <p className="text-xs text-muted-foreground">Level {topic.review_level || 1}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <Badge variant={reviewInfo.overdue ? 'destructive' : 'outline'} className="text-xs">
+                                            {reviewInfo.text}
+                                          </Badge>
+                                          <Badge variant="secondary" className="text-xs">
+                                            {topic.review_count}/{REQUIRED_REVIEWS[topic.difficulty]}
+                                          </Badge>
+                                          {!selectionMode && (
+                                            <Button size="sm" onClick={() => startSingleReview(topic)}>Review</Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               );
                             })}
@@ -569,7 +851,7 @@ export default function Review() {
                                   <Badge variant="outline" className="text-xs">
                                     {topic.last_reviewed && `Mastered ${format(new Date(topic.last_reviewed), 'MMM d')}`}
                                   </Badge>
-                                  <Button size="sm" variant="outline" onClick={() => startReview(topic)}>Review Again</Button>
+                                  <Button size="sm" variant="outline" onClick={() => startSingleReview(topic)}>Review Again</Button>
                                 </div>
                               </div>
                             ))}
@@ -579,6 +861,93 @@ export default function Review() {
                     </Collapsible>
                   );
                 })
+              )}
+            </TabsContent>
+
+            {/* Saved Notes Tab */}
+            <TabsContent value="saved" className="space-y-4 mt-4">
+              {savedNotesTopics.length === 0 ? (
+                <Card className="text-center p-8">
+                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="font-semibold text-lg">No Saved Notes Yet</h3>
+                  <p className="text-muted-foreground">Save notes during your review sessions to access them here.</p>
+                </Card>
+              ) : (
+                savedNotesGrouped.map(subject => (
+                  <Collapsible 
+                    key={subject.id} 
+                    open={openSavedSubjects.includes(subject.id)} 
+                    onOpenChange={(open) => {
+                      setOpenSavedSubjects(prev => open ? [...prev, subject.id] : prev.filter(id => id !== subject.id));
+                    }}
+                  >
+                    <Card>
+                      <CollapsibleTrigger className="w-full">
+                        <CardHeader className="flex flex-row items-center justify-between p-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: subject.color }} />
+                            <CardTitle className="text-lg">{subject.name}</CardTitle>
+                            <Badge variant="secondary">
+                              {subject.units.reduce((acc, u) => acc + u.topics.length, 0)} notes
+                            </Badge>
+                          </div>
+                          {openSavedSubjects.includes(subject.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                        </CardHeader>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <CardContent className="pt-0 space-y-4">
+                          {subject.units.map(unit => (
+                            <Collapsible 
+                              key={unit.id}
+                              open={openSavedUnits.includes(unit.id)}
+                              onOpenChange={(open) => {
+                                setOpenSavedUnits(prev => open ? [...prev, unit.id] : prev.filter(id => id !== unit.id));
+                              }}
+                            >
+                              <CollapsibleTrigger className="w-full">
+                                <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
+                                  <div className="flex items-center gap-2">
+                                    {openSavedUnits.includes(unit.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                    <span className="font-medium">{unit.name}</span>
+                                    <Badge variant="outline" className="text-xs">{unit.topics.length}</Badge>
+                                  </div>
+                                </div>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <div className="pl-6 space-y-2 mt-2">
+                                  {unit.topics.map(topic => (
+                                    <Collapsible key={topic.id}>
+                                      <Card className="overflow-hidden">
+                                        <CollapsibleTrigger className="w-full">
+                                          <div className="flex items-center justify-between p-3 hover:bg-muted/50">
+                                            <div className="flex items-center gap-2">
+                                              <FileText className="h-4 w-4 text-primary" />
+                                              <span className="font-medium text-sm">{topic.name}</span>
+                                            </div>
+                                            <Badge variant="outline" className="text-xs">
+                                              Level {topic.review_level || 1}
+                                            </Badge>
+                                          </div>
+                                        </CollapsibleTrigger>
+                                        <CollapsibleContent>
+                                          <div className="p-4 pt-0 border-t bg-muted/30">
+                                            <div className="prose prose-sm dark:prose-invert max-w-none mt-3">
+                                              <NotesContent content={topic.notes!} level={topic.review_level || 1} />
+                                            </div>
+                                          </div>
+                                        </CollapsibleContent>
+                                      </Card>
+                                    </Collapsible>
+                                  ))}
+                                </div>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          ))}
+                        </CardContent>
+                      </CollapsibleContent>
+                    </Card>
+                  </Collapsible>
+                ))
               )}
             </TabsContent>
           </Tabs>
@@ -591,5 +960,69 @@ export default function Review() {
         </div>
       </DashboardLayout>
     </RequireAuth>
+  );
+}
+
+// Structured Notes Component
+function NotesContent({ content, level }: { content: string | null | undefined; level: number }) {
+  if (!content || typeof content !== 'string') {
+    return <p className="text-sm text-muted-foreground">No notes available.</p>;
+  }
+  
+  const sections = content.split('\n\n').filter(Boolean);
+  
+  return (
+    <div className="space-y-4">
+      {level >= 2 && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+          <Badge variant="outline" className="text-xs">
+            {level === 1 ? 'Concise Summary' : level === 2 ? 'Detailed Notes' : 'Exam-Ready Notes'}
+          </Badge>
+        </div>
+      )}
+      {sections.map((section, index) => {
+        // Check if section is a heading (starts with # or is all caps or ends with :)
+        const isHeading = section.startsWith('#') || section.endsWith(':') || (section.length < 50 && section === section.toUpperCase());
+        
+        if (isHeading) {
+          return (
+            <h4 key={index} className="font-semibold text-sm text-primary mt-4 first:mt-0">
+              {section.replace(/^#+\s*/, '')}
+            </h4>
+          );
+        }
+        
+        // Check if section is a list
+        if (section.includes('\n- ') || section.startsWith('- ') || section.includes('\n• ') || section.startsWith('• ')) {
+          const items = section.split(/\n[-•]\s*/).filter(Boolean);
+          return (
+            <ul key={index} className="list-disc list-inside space-y-1 text-sm">
+              {items.map((item, i) => (
+                <li key={i} className="text-muted-foreground">{item.trim()}</li>
+              ))}
+            </ul>
+          );
+        }
+        
+        // Check if section has numbered items
+        if (/^\d+\.\s/.test(section) || section.includes('\n1. ')) {
+          const items = section.split(/\n\d+\.\s*/).filter(Boolean);
+          return (
+            <ol key={index} className="list-decimal list-inside space-y-1 text-sm">
+              {items.map((item, i) => (
+                <li key={i} className="text-muted-foreground">{item.trim()}</li>
+              ))}
+            </ol>
+          );
+        }
+        
+        // Regular paragraph
+        return (
+          <p key={index} className="text-sm text-muted-foreground leading-relaxed">
+            {section}
+          </p>
+        );
+      })}
+    </div>
   );
 }

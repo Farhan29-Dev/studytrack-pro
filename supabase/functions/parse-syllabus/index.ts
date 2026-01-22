@@ -20,38 +20,55 @@ serve(async (req) => {
 
     console.log("Parsing syllabus file:", fileName, "type:", fileType);
 
-    const systemPrompt = `You are an expert syllabus parser. Extract ONLY the actual content from the syllabus document.
+    const systemPrompt = `You are an expert syllabus parser. Your job is to extract EXACTLY what is written in the document - nothing more, nothing less.
 
 CRITICAL PARSING RULES:
-1. Look for patterns like "UNIT – I:", "UNIT - I:", "Unit 1:", "UNIT I:" followed by the unit title
-2. Topics are usually listed as comma-separated items after each unit heading
-3. Ignore "CO1", "CO2" etc. (course outcome markers) - they are NOT topics
-4. Ignore hours like "[7Hrs.]" - they are NOT topics
-5. Extract ONLY the actual topic names mentioned, NOT generic/random topics
-6. If no clear subject name is found, use "Subject" as the name
+1. UNIT PATTERNS: Look for "UNIT – I:", "UNIT - I:", "Unit 1:", "UNIT I:", "MODULE I:" etc. followed by the unit title
+2. TOPICS: Usually listed as comma-separated items OR line-by-line after each unit heading
+3. IGNORE these markers completely (they are NOT topics):
+   - "CO1", "CO2", "CO3" etc. (Course Outcome markers)
+   - "[7Hrs.]", "[8 Hrs]", "(8 hours)" etc. (Hour notations)
+   - "L1", "L2", "L3" etc. (Level markers)
+   - Reference book names and author names
+4. SUBJECT NAME: Look for the course title at the top. If not found, derive from unit titles or use "Subject"
+5. EXTRACT VERBATIM: Copy topic names exactly as written, don't paraphrase or generate new ones
 
-PARSING EXAMPLE:
-Input: "UNIT – I: The Theory Of Automata CO1 Introduction to automata theory, Examples of automata machine, Finite automata..."
+EXAMPLE INPUT:
+"UNIT – I: The Theory Of Automata CO1 [7Hrs.]
+Introduction to automata theory, Examples of automata machine, Finite automata, Deterministic finite automata"
 
-Output: Unit name = "Unit I: The Theory Of Automata", Topics = ["Introduction to automata theory", "Examples of automata machine", "Finite automata", ...]
+EXAMPLE OUTPUT:
+{
+  "subjects": [{
+    "name": "Theory of Computation",
+    "color": "#3B82F6",
+    "units": [{
+      "name": "Unit I: The Theory Of Automata",
+      "topics": ["Introduction to automata theory", "Examples of automata machine", "Finite automata", "Deterministic finite automata"]
+    }]
+  }]
+}
 
-Return a JSON object with this exact structure:
+Return a JSON object with this EXACT structure:
 {
   "subjects": [
     {
-      "name": "Subject Name (derive from content or use generic name)",
+      "name": "Subject Name",
       "color": "#3B82F6",
       "units": [
         {
           "name": "Unit I: Unit Title",
-          "topics": ["Actual Topic 1", "Actual Topic 2"]
+          "topics": ["Topic 1", "Topic 2", "Topic 3"]
         }
       ]
     }
   ]
 }
 
-IMPORTANT: Extract ONLY what's actually written in the document. DO NOT generate or hallucinate topics.
+CRITICAL: 
+- Extract ONLY what's actually in the document text
+- DO NOT invent, hallucinate, or add topics that aren't explicitly mentioned
+- Preserve the exact wording of topics from the document
 Use these colors for subjects: #3B82F6, #10B981, #F59E0B, #EF4444, #8B5CF6, #EC4899, #06B6D4, #F97316`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

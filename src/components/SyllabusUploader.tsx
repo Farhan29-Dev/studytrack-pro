@@ -1,12 +1,14 @@
 import { useState, useCallback } from 'react';
-import { Upload, FileText, Loader2, X, Check, Edit2 } from 'lucide-react';
+import { Upload, FileText, Loader2, X, Check, Edit2, HelpCircle, ChevronDown, ChevronRight, BookOpen, Folder, FileQuestion } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { extractTextFromPDF } from '@/lib/pdf-parser';
 
 interface ParsedTopic {
   name: string;
@@ -38,6 +40,7 @@ export function SyllabusUploader({ onComplete, onCancel }: SyllabusUploaderProps
   const [uploading, setUploading] = useState(false);
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [editingItem, setEditingItem] = useState<{ type: string; indices: number[]; value: string } | null>(null);
+  const [showInstructions, setShowInstructions] = useState(false);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -67,33 +70,29 @@ export function SyllabusUploader({ onComplete, onCancel }: SyllabusUploaderProps
 
     setUploading(true);
     try {
-      // Read file content as text (for PDF we'll use a simplified approach)
-      const reader = new FileReader();
+      let fileContent: string;
       
-      const fileContent = await new Promise<string>((resolve, reject) => {
-        reader.onload = (e) => {
-          const result = e.target?.result;
-          if (typeof result === 'string') {
-            // For text-based parsing, we'll send the raw content
-            resolve(result);
-          } else if (result instanceof ArrayBuffer) {
-            // Convert ArrayBuffer to base64 for binary files
-            const bytes = new Uint8Array(result);
-            let binary = '';
-            bytes.forEach(b => binary += String.fromCharCode(b));
-            resolve(btoa(binary));
-          } else {
-            reject(new Error('Failed to read file'));
-          }
-        };
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        
-        if (file.type === 'application/pdf') {
-          reader.readAsArrayBuffer(file);
-        } else {
+      // Use PDF.js for PDFs for accurate text extraction
+      if (file.type === 'application/pdf') {
+        console.log('Extracting text from PDF using PDF.js...');
+        fileContent = await extractTextFromPDF(file);
+        console.log('Extracted PDF text:', fileContent.substring(0, 500) + '...');
+      } else {
+        // For Word docs, read as text
+        fileContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const result = e.target?.result;
+            if (typeof result === 'string') {
+              resolve(result);
+            } else {
+              reject(new Error('Failed to read file'));
+            }
+          };
+          reader.onerror = () => reject(new Error('Failed to read file'));
           reader.readAsText(file);
-        }
-      });
+        });
+      }
 
       const { data, error } = await supabase.functions.invoke('parse-syllabus', {
         body: {
@@ -179,6 +178,123 @@ export function SyllabusUploader({ onComplete, onCancel }: SyllabusUploaderProps
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Instructions Panel */}
+        <Collapsible open={showInstructions} onOpenChange={setShowInstructions}>
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" className="w-full justify-between">
+              <span className="flex items-center gap-2">
+                <HelpCircle className="h-4 w-4" />
+                Syllabus Format Instructions
+              </span>
+              {showInstructions ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-4">
+            <div className="bg-muted/50 rounded-lg p-4 space-y-4 text-sm">
+              <div>
+                <h4 className="font-semibold flex items-center gap-2 text-primary mb-2">
+                  <FileQuestion className="h-4 w-4" />
+                  Recommended Syllabus Format
+                </h4>
+                <p className="text-muted-foreground mb-3">
+                  For best parsing accuracy, structure your syllabus document as follows:
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="bg-background rounded-lg p-3 border">
+                  <div className="flex items-center gap-2 font-medium mb-2">
+                    <BookOpen className="h-4 w-4 text-primary" />
+                    Subject Level
+                  </div>
+                  <p className="text-muted-foreground text-xs mb-2">
+                    Start with the subject/course name at the top of the document:
+                  </p>
+                  <code className="block bg-muted p-2 rounded text-xs font-mono">
+                    <span className="text-primary">Subject:</span> Mathematics<br />
+                    <span className="text-muted-foreground">or</span><br />
+                    <span className="text-primary">Course Name:</span> Computer Science
+                  </code>
+                </div>
+
+                <div className="bg-background rounded-lg p-3 border">
+                  <div className="flex items-center gap-2 font-medium mb-2">
+                    <Folder className="h-4 w-4 text-primary" />
+                    Unit Level
+                  </div>
+                  <p className="text-muted-foreground text-xs mb-2">
+                    Format units with clear numbering and titles:
+                  </p>
+                  <code className="block bg-muted p-2 rounded text-xs font-mono">
+                    <span className="text-primary">UNIT – I:</span> Introduction to Programming<br />
+                    <span className="text-primary">UNIT – II:</span> Data Structures<br />
+                    <span className="text-muted-foreground">or</span><br />
+                    <span className="text-primary">Unit 1:</span> Algebra Basics<br />
+                    <span className="text-primary">Module 2:</span> Linear Equations
+                  </code>
+                </div>
+
+                <div className="bg-background rounded-lg p-3 border">
+                  <div className="flex items-center gap-2 font-medium mb-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    Topics Level
+                  </div>
+                  <p className="text-muted-foreground text-xs mb-2">
+                    List topics as comma-separated items or bullet points under each unit:
+                  </p>
+                  <code className="block bg-muted p-2 rounded text-xs font-mono">
+                    <span className="text-muted-foreground"># Comma-separated (preferred):</span><br />
+                    Variables, Data Types, Operators, Control Flow, Functions<br /><br />
+                    <span className="text-muted-foreground"># Or as bullet points:</span><br />
+                    • Variables and Constants<br />
+                    • Data Types<br />
+                    • Operators
+                  </code>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h5 className="font-medium text-destructive mb-2">⚠️ What to Avoid</h5>
+                <ul className="text-muted-foreground text-xs space-y-1 list-disc list-inside">
+                  <li>Hour notations like <code className="bg-muted px-1 rounded">[7Hrs.]</code> or <code className="bg-muted px-1 rounded">(8 Hours)</code></li>
+                  <li>Course outcome markers like <code className="bg-muted px-1 rounded">CO1, CO2</code></li>
+                  <li>Learning objectives sections</li>
+                  <li>Reference book lists</li>
+                  <li>Page numbers and headers/footers</li>
+                </ul>
+              </div>
+
+              <div className="border-t pt-4">
+                <h5 className="font-medium text-success mb-2">✓ Example Structure</h5>
+                <div className="bg-background rounded-lg p-3 border font-mono text-xs">
+                  <div className="text-primary font-bold">Subject: Data Structures and Algorithms</div>
+                  <br />
+                  <div className="text-primary">UNIT – I: Introduction to Data Structures</div>
+                  <div className="pl-4 text-muted-foreground">
+                    Arrays, Linked Lists, Stacks, Queues, Introduction to Time Complexity
+                  </div>
+                  <br />
+                  <div className="text-primary">UNIT – II: Trees and Graphs</div>
+                  <div className="pl-4 text-muted-foreground">
+                    Binary Trees, BST, AVL Trees, Graph Representation, BFS, DFS
+                  </div>
+                  <br />
+                  <div className="text-primary">UNIT – III: Sorting and Searching</div>
+                  <div className="pl-4 text-muted-foreground">
+                    Bubble Sort, Quick Sort, Merge Sort, Binary Search, Hash Tables
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-primary/10 rounded-lg p-3 border border-primary/20">
+                <p className="text-xs">
+                  <strong>💡 Pro Tip:</strong> After parsing, you can edit any incorrectly extracted subjects, units, or topics before saving. Click on any item to edit it or use the × button to remove unwanted entries.
+                </p>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+
         {!parsedData ? (
           <>
             <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
