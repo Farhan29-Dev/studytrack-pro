@@ -129,8 +129,8 @@ export default function Auth() {
         <div className="hidden lg:block">
           <div className="flex gap-4 mt-8">
             <div className="p-4 rounded-xl bg-primary-foreground/10 backdrop-blur animate-slide-up" style={{ animationDelay: '0.2s' }}>
-              <p className="text-3xl font-bold">10K+</p>
-              <p className="text-sm opacity-80">Active Students</p>
+              <p className="text-3xl font-bold">Do</p>
+              <p className="text-sm opacity-80">Smart Work</p>
             </div>
             <div className="p-4 rounded-xl bg-primary-foreground/10 backdrop-blur animate-slide-up" style={{ animationDelay: '0.3s' }}>
               <p className="text-3xl font-bold">95%</p>
